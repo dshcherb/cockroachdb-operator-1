@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import socket
 import sys
 sys.path.append('lib')  # noqa
 
@@ -14,6 +15,15 @@ from ops.model import (
 
 from db_instance_manager import DbInstanceManager
 from cluster import CockroachDbCluster
+
+from datetime import timedelta
+from tcp_lb import (
+    TCPLoadBalancer,
+    Listener,
+    Backend,
+    HTTPHealthMonitor,
+    BalancingAlgorithm,
+)
 
 
 class CockroachDbCharm(CharmBase):
@@ -40,6 +50,10 @@ class CockroachDbCharm(CharmBase):
                                self.cluster.on_cluster_initialized)
 
         self.framework.observe(self.instance_manager.on.daemon_started, self._on_daemon_started)
+
+        self.tcp_load_balancer = TCPLoadBalancer(self, 'tcp-load-balancer')
+        self.framework.observe(self.tcp_load_balancer.on.load_balancer_available,
+                               self._on_tcp_load_balancer_available)
 
     def _on_install(self, event):
         self.instance_manager.install()
@@ -95,6 +109,21 @@ class CockroachDbCharm(CharmBase):
 
     def _on_config_changed(self, event):
         self.instance_manager.reconfigure()
+
+    def _on_tcp_load_balancer_available(self, event):
+        listener = Listener(
+            name=self.app.name.replace('/', '_'),
+            port=self.PSQL_PORT,
+            balancing_algorithm=BalancingAlgorithm.ROUND_ROBIN,
+        )
+        fqdn = socket.getfqdn()
+        backend = Backend(fqdn, self.PSQL_PORT, monitor_port=self.HTTP_PORT)
+        health_monitor = HTTPHealthMonitor(
+            timeout=timedelta(seconds=10),
+            http_method='GET',
+            url_path='/health?ready=1'
+        )
+        self.tcp_load_balancer.expose_backend(backend, listener, health_monitor)
 
 
 if __name__ == '__main__':

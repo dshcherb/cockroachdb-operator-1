@@ -10,6 +10,9 @@ provides:
     db:
         interface: pgsql
         optional: true
+requires:
+    tcp-load-balancer:
+        interface: tcp-load-balancer
 peers:
     cluster:
         interface: cockroachdb-peer
